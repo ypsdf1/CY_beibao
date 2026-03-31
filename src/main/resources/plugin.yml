@@ -1,0 +1,8 @@
+name: CY_beibao
+version: 1.0
+main: com.CY.Main  # 对应截图中的 package com.CY
+api-version: '1.21'
+commands:
+  cy:
+    description: 云背包被控端主指令
+    usage: /cy <buy|rent|give|update|push>
