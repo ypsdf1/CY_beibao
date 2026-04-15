@@ -1,6 +1,6 @@
 name: CY_beibao
 version: 1.0
-main: com.cy.Main
+main: com.CY.Main
 api-version: '1.20'
 author: SDF_Engine
 commands:
