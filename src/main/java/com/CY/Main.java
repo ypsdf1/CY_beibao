@@ -1,165 +1,143 @@
 package com.CY;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Material;
+import org.bukkit.*;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.inventory.InventoryOpenEvent;
-import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemStack;
+import org.bukkit.event.*;
+import org.bukkit.event.inventory.*;
+import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scoreboard.Objective;
-import org.bukkit.scoreboard.Scoreboard;
-import org.jetbrains.annotations.NotNull;
-
+import org.bukkit.util.io.*;
+import org.yaml.snakeyaml.external.biz.base64Coder.Base64Coder;
+import java.io.*;
+import java.sql.*;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class Main extends JavaPlugin implements Listener, CommandExecutor {
+    private static Connection db;
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
+        try {
+            if (!getDataFolder().exists()) getDataFolder().mkdirs();
+            db = DriverManager.getConnection("jdbc:sqlite:" + new File(getDataFolder(), "storage.db"));
+            Statement st = db.createStatement();
+
+            // 爆破式表结构修复
+            try {
+                st.executeQuery("SELECT page FROM v LIMIT 1");
+            } catch (SQLException e) {
+                st.execute("DROP TABLE IF EXISTS v");
+                Bukkit.getConsoleSender().sendMessage("§e[CY] 数据库格式过旧，已重置表结构。");
+            }
+            st.execute("CREATE TABLE IF NOT EXISTS v (p TEXT, page INT, slot INT, data TEXT)");
+            Bukkit.getConsoleSender().sendMessage("§a[CY] 仓库系统已就绪，等待主控握手信号。");
+        } catch (Exception e) { e.printStackTrace(); }
         getCommand("cy").setExecutor(this);
         getServer().getPluginManager().registerEvents(this, this);
     }
 
-    // --- 1. 大白话存储规则解析器 ---
-    // 从配置文件提取计分板名称。比如配置写："存储在名为VipDays的计分板里" -> 提取 VipDays
-    private String getDbName(String path, String def) {
-        String line = getConfig().getString(path, "");
-        if (line.isEmpty()) return def;
-        Matcher m = Pattern.compile("(?i)(?<=名为|obj:|scoreboard:)\\s*(\\w+)").matcher(line);
-        return m.find() ? m.group(1) : def;
+    @Override
+    public boolean onCommand(CommandSender s, Command c, String l, String[] a) {
+        if (s instanceof Player) openPage((Player) s, 0);
+        return true;
     }
 
-    // 获取玩家计分板数值
-    private int getScore(Player p, String configPath, String defaultObj) {
-        String objName = getDbName(configPath, defaultObj);
-        Scoreboard sb = Bukkit.getScoreboardManager().getMainScoreboard();
-        Objective obj = sb.getObjective(objName);
-        return (obj == null) ? 0 : obj.getScore(p.getName()).getScore();
-    }
+    public void openPage(Player p, int page) {
+        p.setMetadata("CY_PAGE", new FixedMetadataValue(this, page));
+        p.setMetadata("CY_LOCK", new FixedMetadataValue(this, System.currentTimeMillis()));
 
-    // --- 2. 语义时间解析 (14天封顶) ---
-    private int parseAlertDays(String raw) {
-        String s = raw.toLowerCase();
-        int days = 0;
-        if (s.contains("两周")) days = 14;
-        else if (s.contains("一星")) days = 7;
-        else {
-            Matcher m = Pattern.compile("\\d+").matcher(s);
-            if (m.find()) days = Integer.parseInt(m.group());
-        }
-        return Math.min(days, 14); // 源码硬锁14天
-    }
+        Inventory inv = Bukkit.createInventory(null, 54, "§0[云端仓库] 第 " + (page + 1) + " 页");
+        for (int i = 45; i < 54; i++) inv.setItem(i, btn(Material.GRAY_STAINED_GLASS_PANE, " ", null));
+        inv.setItem(45, btn(Material.ARROW, "§f上一页", null));
+        inv.setItem(49, btn(Material.EMERALD, "§a§l商城与统计", "§7当前存量: §e" + count(p, page) + " / 40"));
+        inv.setItem(53, btn(Material.ARROW, "§f下一页", null));
 
-    @EventHandler
-    public void onInventoryOpen(InventoryOpenEvent e) {
-        if (e.getView().getTitle().contains("云背包")) {
-            Player p = (Player) e.getPlayer();
-            // 从配置定义的计分板读取剩余天数
-            int remainingDays = getScore(p, "storage.vip-days-rule", "VipDays");
-            int alertDays = parseAlertDays(getConfig().getString("settings.alert-before", "7天"));
-
-            if (remainingDays <= alertDays && remainingDays > 0) {
-                p.sendMessage("§e[提醒] §f云背包会员仅剩 §c" + remainingDays + " §f天，请及时续费。");
-            } else if (remainingDays <= 0) {
-                p.sendMessage("§4[锁定] §f会员已到期，非免费格子已进入 §c只读模式§f！");
-            }
-        }
-    }
-
-    @EventHandler
-    public void onInventoryClick(InventoryClickEvent e) {
-        if (!e.getView().getTitle().contains("云背包")) return;
-
-        Player p = (Player) e.getWhoClicked();
-        int rawSlot = e.getRawSlot();
-        // 提取页码
-        int page = 1;
-        try { page = Integer.parseInt(e.getView().getTitle().replaceAll("[^0-9]", "")); } catch (Exception ignored) {}
-
-        int absoluteSlot = (page - 1) * 45 + rawSlot + 1;
-
-        // A. 导航翻页逻辑
-        if (rawSlot >= 45 && rawSlot <= 53) {
-            e.setCancelled(true);
-            if (rawSlot == 48 && page > 1) openCloudInventory(p, page - 1);
-            if (rawSlot == 50) openCloudInventory(p, page + 1);
-            return;
-        }
-
-        // B. 存储与只读逻辑
-        if (rawSlot < 45) {
-            int unlockedMax = getScore(p, "storage.unlocked-slots-rule", "UnlockedSlots");
-            if (unlockedMax < 54) unlockedMax = 54; // 基础免费54格
-
-            // 1. 越权点击判定
-            if (absoluteSlot > unlockedMax) {
-                p.sendMessage("§c[锁定] §f该格子尚未解锁。");
-                e.setCancelled(true);
-                return;
-            }
-
-            // 2. 过期只读判定 (只对 54格以后的收费格生效)
-            if (absoluteSlot > 54) {
-                int days = getScore(p, "storage.vip-days-rule", "VipDays");
-                if (days <= 0) {
-                    // 只读：允许拿起(PICKUP)，禁止放入(PLACE/SWAP)
-                    if (e.getCursor() != null && e.getCursor().getType() != Material.AIR) {
-                        p.sendMessage("§c[只读] §f会员已过期，收费格子禁止存入！");
-                        e.setCancelled(true);
-                        return;
-                    }
-                }
-            }
-
-            // 3. 空间耗尽预警 (针对已解锁上限的最后1格)
-            checkSpaceWarning(p, e.getInventory(), unlockedMax);
-        }
-    }
-
-    private void checkSpaceWarning(Player p, Inventory inv, int max) {
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            int count = 0;
-            for (int i = 0; i < 45; i++) {
-                if (inv.getItem(i) != null && inv.getItem(i).getType() != Material.AIR) count++;
-            }
-            if (count >= (max - 1) || (max <= 54 && count >= 53)) {
-                p.sendMessage("§6[预警] §f存储空间不足，请及时清理或扩容。");
-            }
-        }, 1L);
-    }
-
-    private void openCloudInventory(Player p, int page) {
-        Inventory inv = Bukkit.createInventory(null, 54, "§0云背包 - 第 " + page + " 页");
-
-        // 填充导航栏
-        ItemStack glass = new ItemStack(Material.BLACK_STAINED_GLASS_PANE);
-        ItemMeta gm = glass.getItemMeta(); gm.setDisplayName(" "); glass.setItemMeta(gm);
-        for (int i = 45; i < 54; i++) inv.setItem(i, glass);
-
-        ItemStack prev = new ItemStack(Material.ARROW);
-        ItemMeta pm = prev.getItemMeta(); pm.setDisplayName("§e上一页 (Page " + (page-1) + ")"); prev.setItemMeta(pm);
-
-        ItemStack next = new ItemStack(Material.ARROW);
-        ItemMeta nm = next.getItemMeta(); nm.setDisplayName("§6下一页 (Page " + (page+1) + ")"); next.setItemMeta(nm);
-
-        if (page > 1) inv.setItem(48, prev);
-        inv.setItem(50, next);
-
+        try (PreparedStatement ps = db.prepareStatement("SELECT slot, data FROM v WHERE p = ? AND page = ?")) {
+            ps.setString(1, p.getName()); ps.setInt(2, page);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) inv.setItem(rs.getInt("slot"), deserialize(rs.getString("data")));
+        } catch (Exception ignored) {}
         p.openInventory(inv);
     }
 
-    @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, @NotNull String[] args) {
-        if (sender instanceof Player p && args.length == 0) openCloudInventory(p, 1);
-        return true;
+    @EventHandler
+    public void onClick(InventoryClickEvent e) {
+        if (e.getClickedInventory() == null || !e.getView().getTitle().contains("[云端仓库]")) return;
+        Player p = (Player) e.getWhoClicked();
+        int slot = e.getRawSlot();
+
+        if (p.hasMetadata("CY_LOCK") && System.currentTimeMillis() - p.getMetadata("CY_LOCK").get(0).asLong() < 400) {
+            e.setCancelled(true); return;
+        }
+
+        if (slot >= 45 && slot <= 53) {
+            e.setCancelled(true);
+            int page = p.getMetadata("CY_PAGE").get(0).asInt();
+            if (slot == 45 && page > 0) { save(p, page, e.getInventory()); openPage(p, page - 1); }
+            if (slot == 53) {
+                save(p, page, e.getInventory());
+                // 翻页限制：前三页必须满 40 格
+                if (page < 2 || count(p, page) >= 40) openPage(p, page + 1);
+                else p.sendMessage("§c§l[拒绝] §7当前仓库分拣度不足 40 格。");
+            }
+        }
+    }
+
+    @EventHandler
+    public void onClose(InventoryCloseEvent e) {
+        if (e.getView().getTitle().contains("[云端仓库]") && e.getPlayer().hasMetadata("CY_PAGE")) {
+            save((Player) e.getPlayer(), e.getPlayer().getMetadata("CY_PAGE").get(0).asInt(), e.getInventory());
+        }
+    }
+
+    private void save(Player p, int page, Inventory inv) {
+        try {
+            PreparedStatement del = db.prepareStatement("DELETE FROM v WHERE p = ? AND page = ?");
+            del.setString(1, p.getName()); del.setInt(2, page); del.executeUpdate();
+            PreparedStatement ins = db.prepareStatement("INSERT INTO v VALUES (?,?,?,?)");
+            for (int i = 0; i < 45; i++) {
+                ItemStack it = inv.getItem(i);
+                if (it != null && it.getType() != Material.AIR) {
+                    ins.setString(1, p.getName()); ins.setInt(2, page);
+                    ins.setInt(3, i); ins.setString(4, serialize(it));
+                    ins.executeUpdate();
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private int count(Player p, int page) {
+        try (PreparedStatement ps = db.prepareStatement("SELECT COUNT(*) FROM v WHERE p=? AND page=?")) {
+            ps.setString(1, p.getName()); ps.setInt(2, page);
+            ResultSet rs = ps.executeQuery(); return rs.next() ? rs.getInt(1) : 0;
+        } catch (Exception e) { return 0; }
+    }
+
+    // --- 反射握手入口 ---
+    public static void apiReceive(String n, int s, int d) {
+        Bukkit.getConsoleSender().sendMessage("§6[CY-Memory] 收到来自主控的扩容指令!");
+        Bukkit.getConsoleSender().sendMessage("§7- 玩家: " + n + " | 增加格子: " + s + " | 增加时长: " + d);
+        // 这里对接具体的扩容逻辑
+    }
+
+    private String serialize(ItemStack item) {
+        try (ByteArrayOutputStream o = new ByteArrayOutputStream(); BukkitObjectOutputStream d = new BukkitObjectOutputStream(o)) {
+            d.writeObject(item); return Base64Coder.encodeLines(o.toByteArray());
+        } catch (Exception e) { return ""; }
+    }
+
+    private ItemStack deserialize(String b64) {
+        try (ByteArrayInputStream i = new ByteArrayInputStream(Base64Coder.decodeLines(b64)); BukkitObjectInputStream d = new BukkitObjectInputStream(i)) {
+            return (ItemStack) d.readObject();
+        } catch (Exception e) { return null; }
+    }
+
+    private ItemStack btn(Material m, String n, String lore) {
+        ItemStack item = new ItemStack(m); ItemMeta mt = item.getItemMeta();
+        mt.setDisplayName(n); if (lore != null) mt.setLore(Arrays.asList(lore.split("\n")));
+        item.setItemMeta(mt); return item;
     }
 }
