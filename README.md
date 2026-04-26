@@ -5,7 +5,7 @@
 ### 3. 操作简便
 
 ## 食用方法：
-## 1. 下载，从[点击此处](https://github.com/ypsdf1/CY_beibao/releases)下载我们的最新版
+## 1. 下载，从 [GitHub](https://github.com/ypsdf1/CY_beibao/releases) 或 [Gitee](https://gitee.com/nihaoshidifu/cy_beibao/releases) 下载我们的最新版
 ## 2. 安装，把jar丢进你服务器的plugin
 ## 3. 启动，如果你之前使用过我们的1.01内测版、1.0测试版，记得删除旧的CY_beibao文件，如果没有，直接启动服务器或者运行的服务器打个stop
 ## 4. 打开背包：/cy
