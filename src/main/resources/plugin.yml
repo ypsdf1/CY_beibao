@@ -1,9 +1,20 @@
 name: CY_beibao
-version: 1.0
+version: '1.0'
 main: com.CY.Main
-api-version: '1.20'
-author: SDF_Engine
+api-version: '1.21'
+description: sdf1_CY 会员仓库系统 - 被控端
+authors: ['Sdf1']
+softdepend: [Vault]
 commands:
   cy:
-    description: "Open your cloud vault"
-    usage: "/cy"
+    description: 会员仓库主命令
+    usage: /cy [reload|status|info|remove|shop|update]
+    permission: cy.use
+    permission-message: §c你没有权限使用此命令
+permissions:
+  cy.use:
+    description: 使用 /cy 基础命令
+    default: true
+  cy.admin:
+    description: 管理员权限（reload/status/info/remove/update）
+    default: op
