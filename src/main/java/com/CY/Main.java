@@ -323,23 +323,36 @@ public class Main extends JavaPlugin
 
 // ===== SECTION: 范围解析工具 =====
 
-    /** [FIX #2] 解析范围字符串，返回[min,max]，非范围返回null */
+    /** [FIX #2] 解析范围字符串，支持 "1-2"、"1天-2天"、"1-2天" 等写法 */
     private static int[] parseRange(String s) {
         if (s == null) return null;
         String trimmed = s.trim();
+        // 按分隔符切分
         String[] parts = trimmed.split("[\\-~到,]");
         if (parts.length == 2) {
-            try {
-                int a = Integer.parseInt(parts[0].trim());
-                int b = Integer.parseInt(parts[1].trim());
-                return new int[]{
-                        Math.min(a, b), Math.max(a, b)};
-            } catch (NumberFormatException e) {
-                return null;
+            int a = extractInt(parts[0]);
+            int b = extractInt(parts[1]);
+            if (a > 0 && b > 0) {
+                return new int[]{Math.min(a, b), Math.max(a, b)};
             }
         }
         return null;
     }
+
+    /** 从字符串中提取第一个整数，忽略中文单位等非数字字符 */
+    private static int extractInt(String s) {
+        if (s == null) return 0;
+        String trimmed = s.trim();
+        // 去掉所有非数字非负号字符，只保留数字
+        String digits = trimmed.replaceAll("[^\\d-]", "").trim();
+        if (digits.isEmpty() || digits.equals("-")) return 0;
+        try {
+            return Math.abs(Integer.parseInt(digits));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
 // ===== SECTION: 生命周期 =====
 
     @Override
@@ -1587,20 +1600,48 @@ public class Main extends JavaPlugin
     private List<String> onlinePlayerNames() { List<String> names = new ArrayList<>(); for (Player pl : Bukkit.getOnlinePlayers()) names.add(pl.getName()); return names; }
 
     // ===== SECTION: 版本更新 =====
+    // ===== SECTION: 版本更新 =====
     private void checkUpdate(final CommandSender manual) {
+        String checkingMsg = "[CY] 正在检查更新...";
+        getLogger().info(checkingMsg);
+        if (manual != null) manual.sendMessage(checkingMsg);
         new Thread(() -> {
             try {
                 boolean preferGH = "GH".equalsIgnoreCase(updateCh) || updateCh.isEmpty();
-                String pApi = preferGH ? API_GH : API_GE; String pDl = preferGH ? DL_GH : DL_GE; String pName = preferGH ? "GitHub" : "Gitee";
-                String bApi = preferGH ? API_GE : API_GH; String bDl = preferGH ? DL_GE : DL_GH; String bName = preferGH ? "Gitee" : "GitHub";
+                String pApi = preferGH ? API_GH : API_GE;
+                String pDl  = preferGH ? DL_GH  : DL_GE;
+                String pName = preferGH ? "GitHub" : "Gitee";
+                String bApi = preferGH ? API_GE : API_GH;
+                String bDl  = preferGH ? DL_GE  : DL_GH;
+                String bName = preferGH ? "Gitee" : "GitHub";
+
+                // 优先渠道
                 String[] res = fetchRelease(pApi, pName);
-                if (res != null) { applyUpdate(res[0], res[1], pDl, manual, pName); return; }
-                getLogger().info("[\u66f4\u65b0] " + pName + " \u5931\u8d25\uff0c\u5207\u6362 " + bName);
+                if (res != null) {
+                    String linkMsg = "[更新] " + pName + " 最新版本: " + res[0] + " | 下载: " + pDl;
+                    getLogger().info(linkMsg);
+                    if (manual != null)
+                        manual.sendMessage("§a[更新] §f" + pName + " 最新版本: §e" + res[0] + " §f| 下载: §b" + pDl);
+                    applyUpdate(res[0], res[1], pDl, manual, pName);
+                    return;
+                }
+                getLogger().info("[更新] " + pName + " 失败，切换 " + bName);
+
+                // 备用渠道
                 res = fetchRelease(bApi, bName);
-                if (res != null) { applyUpdate(res[0], res[1], bDl, manual, bName); return; }
-                getLogger().info("[\u66f4\u65b0] \u53cc\u8def\u5747\u5931\u8d25");
-                if (manual != null) manual.sendMessage("\u00a7c[\u66f4\u65b0] \u00a7f\u68c0\u67e5\u5931\u8d25");
-            } catch (Exception e) { getLogger().warning("[\u66f4\u65b0] " + e.getMessage()); }
+                if (res != null) {
+                    String linkMsg = "[更新] " + bName + " 最新版本: " + res[0] + " | 下载: " + bDl;
+                    getLogger().info(linkMsg);
+                    if (manual != null)
+                        manual.sendMessage("§a[更新] §f" + bName + " 最新版本: §e" + res[0] + " §f| 下载: §b" + bDl);
+                    applyUpdate(res[0], res[1], bDl, manual, bName);
+                    return;
+                }
+                getLogger().info("[更新] 双路均失败");
+                if (manual != null) manual.sendMessage("§c[更新] §f检查失败");
+            } catch (Exception e) {
+                getLogger().warning("[更新] " + e.getMessage());
+            }
         }).start();
     }
 
