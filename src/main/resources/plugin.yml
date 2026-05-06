@@ -8,7 +8,7 @@ softdepend: [Vault]
 commands:
   cy:
     description: 会员仓库主命令
-    usage: /cy [reload|status|info|remove|shop|update|add|set]
+    usage: /cy [reload|status|info|remove|shop|update|add|set|reset]
     permission: cy.use
     permission-message: §c你没有权限使用此命令
 permissions:
@@ -16,5 +16,5 @@ permissions:
     description: 使用 /cy 基础命令
     default: true
   cy.admin:
-    description: 管理员权限（reload/status/info/remove/update/add/set）
+    description: 管理员权限（reload/status/info/remove/update/add/set|reset）
     default: op
