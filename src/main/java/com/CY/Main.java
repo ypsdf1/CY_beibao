@@ -47,9 +47,12 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+import org.bukkit.OfflinePlayer;
+
 
 public class Main extends JavaPlugin
         implements CommandExecutor, Listener, TabCompleter {
+
 
 // ===== SECTION: ShopItem 内部类 =====
 
@@ -62,6 +65,7 @@ public class Main extends JavaPlugin
         private String adminTag = "admin";
         private double price;
         private int stock;
+
         private Material logo;
         private String logoItem;
         private double discountRate;
@@ -355,15 +359,15 @@ public class Main extends JavaPlugin
     private static final long DBL_CLICK_MS = 400;
     private static final long ADMIN_VERIFY_MS = 300000L;
 
-    private static final String T_MAIN = "\u00a76\u00a7l\u4f1a\u5458\u4e2d\u5fc3";
-    private static final String T_MY = "\u00a7a\u00a7l\u6211\u7684";
-    private static final String T_SHOP = "\u00a7b\u00a7l\u5546\u57ce";
-    private static final String T_STORE = "\u00a7d\u00a7l\u4e3b\u4ed3";
-    private static final String T_ADMIN_MAIN = "\u00a7c\u00a7l\u7ba1\u7406\u9762\u677f";
-    private static final String T_USER_MGMT = "\u00a7c\u00a7l\u7528\u6237\u7ba1\u7406";
-    private static final String T_SHOP_MGMT = "\u00a76\u00a7l\u5546\u54c1\u7ba1\u7406";
-    private static final String T_ITEM_EDIT = "\u00a7e\u00a7l\u5546\u54c1\u7f16\u8f91";
-    private static final String T_NEW_ITEM = "\u00a7a\u00a7l\u53d1\u5e03\u5546\u54c1";
+    private static final String T_MAIN = "§6§l会员中心";
+    private static final String T_MY = "§a§l我的";
+    private static final String T_SHOP = "§b§l商城";
+    private static final String T_STORE = "§d§l主仓";
+    private static final String T_ADMIN_MAIN = "§c§l管理面板";
+    private static final String T_USER_MGMT = "§c§l用户管理";
+    private static final String T_SHOP_MGMT = "§6§l商品管理";
+    private static final String T_ITEM_EDIT = "§e§l商品编辑";
+    private static final String T_NEW_ITEM = "§a§l发布商品";
 
     private static final String API_GH =
             "https://api.github.com/repos/ypsdf1/CY_beibao/releases/latest";
@@ -406,6 +410,12 @@ public class Main extends JavaPlugin
     private String updateCh = "";
     private String adminPass = "qweasd";
     private String remoteVer = "";
+    private String economyMode = "bond";  // 经济模式：bond 或 vault
+    private String bondName = "债券";       // 债券显示名称
+    private Object sdf1Plugin = null;
+    private Object bondManager = null;
+    private boolean bondInited = false;
+
 
     private String masterPluginName = "";
     private String sharedSecret = "";
@@ -443,7 +453,7 @@ public class Main extends JavaPlugin
     private static int[] parseRange(String s) {
         if (s == null) return null;
         String trimmed = s.trim();
-        String[] parts = trimmed.split("[\\-~\u5230,]");
+        String[] parts = trimmed.split("[\\-~到,]");
         if (parts.length == 2) {
             int a = extractInt(parts[0]);
             int b = extractInt(parts[1]);
@@ -467,39 +477,81 @@ public class Main extends JavaPlugin
     }
 
 // ===== SECTION: 生命周期 =====
+@Override
+public void onEnable() {
+    getDataFolder().mkdirs();
+    shopIconKey = new NamespacedKey(this, "shop_icon");
+    paneSessionKey = new NamespacedKey(this, "pane_session");
 
-    @Override
-    public void onEnable() {
-        getDataFolder().mkdirs();
-        shopIconKey = new NamespacedKey(this, "shop_icon");
-        paneSessionKey = new NamespacedKey(this, "pane_session");
-
-
-        initDB();
-        loadShop();
-        setupEconomy();
-
-        getCommand("cy").setExecutor(this);
-        getCommand("cy").setTabCompleter(this);
-        getServer().getPluginManager().registerEvents(this, this);
-
-        Bukkit.getScheduler().runTaskTimer(this,
-                () -> checkAutoRenewal(), 200L, 200L);
-        Bukkit.getScheduler().runTaskTimer(this,
-                () -> checkExpiryReminder(), 600L, 600L);
-        Bukkit.getScheduler().runTaskLater(this,
-                () -> checkUpdate(null), 60L);
-
-        if (masterPluginName != null && !masterPluginName.isEmpty()) {
-            Bukkit.getScheduler().runTaskLater(this,
-                    () -> discoverMaster(), 100L);
-            Bukkit.getScheduler().runTaskTimer(this,
-                    () -> discoverMaster(), 6000L, 6000L);
+    initDB();
+    loadShop();        // economyMode 在这里被读取
+// 反射发现 Sdf1_login 债券系统
+    // 反射发现 Sdf1_login 债券系统
+    // onEnable 里反射发现
+    Bukkit.getScheduler().runTaskLater(this, () -> {
+        try {
+            org.bukkit.plugin.Plugin pl = Bukkit.getPluginManager().getPlugin("Sdf1_login");
+            if (pl == null || !pl.isEnabled()) {
+                getLogger().warning("[经济] Sdf1_login 未就绪");
+                return;
+            }
+            java.lang.reflect.Method m = pl.getClass().getMethod("getBondManager");
+            bondManager = m.invoke(pl);
+            bondInited = (bondManager != null);
+            getLogger().info("[经济] " + (bondInited ? "连接成功" : "返回null"));
+        } catch (Exception e) {
+            getLogger().severe("[经济] 连接失败: " + e.getMessage());
         }
+    }, 40L);
 
-        getLogger().info("CY v" + localVer
-                + " | \u5546\u54c1=" + shopList.size() + " | \u5c31\u7eea");
+// 定期重连（万一插件延迟启动）
+    Bukkit.getScheduler().runTaskTimer(this, () -> {
+        if (bondInited) return;
+        try {
+            org.bukkit.plugin.Plugin pl = Bukkit.getPluginManager().getPlugin("Sdf1_login");
+            if (pl == null || !pl.isEnabled()) return;
+            sdf1Plugin = pl;
+
+            java.lang.reflect.Field targetField = null;
+            for (java.lang.reflect.Field f : pl.getClass().getDeclaredFields()) {
+                if (f.getType().getName().contains("BondManager")) {
+                    targetField = f;
+                }
+            }
+            if (targetField == null) return;
+
+            targetField.setAccessible(true);
+            bondManager = targetField.get(pl);
+            if (bondManager != null) {
+                bondInited = true;
+                getLogger().info("[经济] 重连成功");
+            }
+        } catch (Exception ignored) {}
+    }, 100L, 200L);
+
+
+    getCommand("cy").setExecutor(this);
+    getCommand("cy").setTabCompleter(this);
+    getServer().getPluginManager().registerEvents(this, this);
+
+    Bukkit.getScheduler().runTaskTimer(this,
+            () -> checkAutoRenewal(), 200L, 200L);
+    Bukkit.getScheduler().runTaskTimer(this,
+            () -> checkExpiryReminder(), 600L, 600L);
+    Bukkit.getScheduler().runTaskLater(this,
+            () -> checkUpdate(null), 60L);
+
+    if (masterPluginName != null && !masterPluginName.isEmpty()) {
+        Bukkit.getScheduler().runTaskLater(this,
+                () -> discoverMaster(), 100L);
+        Bukkit.getScheduler().runTaskTimer(this,
+                () -> discoverMaster(), 6000L, 6000L);
     }
+
+    getLogger().info("CY v" + localVer
+            + " | 商品=" + shopList.size() + " | 就绪");
+}
+
 
     @Override
     public void onDisable() {
@@ -511,7 +563,7 @@ public class Main extends JavaPlugin
 
     private void setupEconomy() {
         if (getServer().getPluginManager().getPlugin("Vault") == null) {
-            getLogger().info("[Vault] \u672a\u627e\u5230\uff0c5\u79d2\u540e\u91cd\u8bd5");
+            getLogger().warning("[Vault] 未找到，5秒后重试");
             Bukkit.getScheduler().runTaskLater(this,
                     () -> setupEconomy(), 100L);
             return;
@@ -520,14 +572,16 @@ public class Main extends JavaPlugin
                 getServer().getServicesManager().getRegistration(Economy.class);
         if (rsp != null) {
             economy = rsp.getProvider();
-            getLogger().info("[Vault] \u5df2\u8fde\u63a5: " + economy.getName());
+            getLogger().info("[Vault] 已连接: " + economy.getName());
         } else {
-            getLogger().warning("[Vault] \u672a\u627e\u5230\u7ecf\u6d4e\u63d0\u4f9b\u8005");
+            getLogger().warning("[Vault] 未找到经济提供者");
         }
     }
 
+
     private void checkAutoRenewal() {
-        if (db == null || economy == null) return;
+        if (db == null) return;
+        if (!isBondMode() && economy == null) return;
         try {
             PreparedStatement ps = db.prepareStatement(
                     "SELECT player_name, membership_slots, expire_time, plan_id "
@@ -549,7 +603,7 @@ public class Main extends JavaPlugin
                         setAutoRenew(name, false);
                         Player online = Bukkit.getPlayer(name);
                         if (online != null && online.isOnline()) {
-                            online.sendMessage("\u00a7c[CY] \u00a7f\u5957\u9910\u5df2\u4e0b\u67b6\uff0c\u81ea\u52a8\u7eed\u8d39\u5df2\u5173\u95ed");
+                            online.sendMessage("§c[CY] §f套餐已下架，自动续费已关闭");
                         }
                         continue;
                     }
@@ -557,7 +611,7 @@ public class Main extends JavaPlugin
                         setAutoRenew(name, false);
                         Player online = Bukkit.getPlayer(name);
                         if (online != null && online.isOnline()) {
-                            online.sendMessage("\u00a7c[CY] \u00a7f\u76f2\u76d2\u5957\u9910\u4e0d\u652f\u6301\u81ea\u52a8\u7eed\u8d39\uff0c\u5df2\u5173\u95ed");
+                            online.sendMessage("§c[CY] §f盲盒套餐不支持自动续费，已关闭");
                         }
                         continue;
                     }
@@ -567,19 +621,19 @@ public class Main extends JavaPlugin
                         setAutoRenew(name, false);
                         continue;
                     }
-                    org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(name);
-                    if (economy.has(op, price)) {
-                        economy.withdrawPlayer(op, price);
+                    // 统一经济接口
+                    if (hasEnough(name, price)) {
+                        withdraw(name, price);
                         setExpire(name, exp + (long) days * 86400000L);
                         Player online = Bukkit.getPlayer(name);
                         if (online != null && online.isOnline()) {
-                            online.sendMessage("\u00a7a[CY] \u00a7f\u81ea\u52a8\u7eed\u8d39\u6210\u529f\uff01\u5ef6\u957f" + days + "\u5929\uff0c\u6263\u8d39$" + fmt(price));
+                            online.sendMessage("§a[CY] §f自动续费成功！延长" + days + "天，扣除$" + fmt(price));
                         }
                     } else {
                         setAutoRenew(name, false);
                         Player online = Bukkit.getPlayer(name);
                         if (online != null && online.isOnline()) {
-                            online.sendMessage("\u00a7c[CY] \u00a7f\u4f59\u989d\u4e0d\u8db3\uff08\u9700\u8981$" + fmt(price) + "\uff09\uff0c\u81ea\u52a8\u7eed\u8d39\u5df2\u5173\u95ed");
+                            online.sendMessage("§c[CY] §f余额不足（需要$" + fmt(price) + "），自动续费已关闭");
                         }
                     }
                 }
@@ -588,6 +642,26 @@ public class Main extends JavaPlugin
             ps.close();
         } catch (Exception e) {
             getLogger().severe("[CY] autoRenew error: " + e.getMessage());
+        }
+    }
+    private boolean hasEnough(String name, double amount) {
+        double bal = getBalance(name);
+        boolean result = bal >= amount;
+        getLogger().info("[调试] hasEnough name=" + name + " bal=" + bal + " need=" + amount + " result=" + result);
+        return result;
+    }
+
+    private boolean withdraw(String name, double amount) {
+        if (isBondMode()) {
+            boolean result = withdrawFromSdf1(name, amount);
+            getLogger().info("[调试] withdraw bond name=" + name + " amount=" + amount + " result=" + result);
+            return result;
+        } else {
+            if (economy == null) return false;
+            org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(name);
+            if (!economy.has(op, amount)) return false;
+            economy.withdrawPlayer(op, amount);
+            return true;
         }
     }
 
@@ -630,29 +704,29 @@ public class Main extends JavaPlugin
         Map<String, Object> m = getMember(name);
         String planName = (String) m.get("plan");
         ShopItem plan = (planName != null && !planName.isEmpty()) ? findItemById(planName) : null;
-        String label = (plan != null) ? plan.getName() : "\u4f1a\u5458\u5957\u9910";
+        String label = (plan != null) ? plan.getName() : "会员套餐";
         boolean autoRenew = isAutoRenew(name);
         switch (level) {
             case 1:
                 if (autoRenew) {
-                    p.sendMessage("\u00a7e\u00a7l[CY] \u00a7f\u60a8\u7684" + label + "\u5c06\u572810\u5206\u949f\u5185\u5230\u671f\uff0c\u81ea\u52a8\u7eed\u8d39\u5904\u7406\u4e2d...");
+                    p.sendMessage("§e§l[CY] §f您的" + label + "将在10分钟内到期，自动续费处理中...");
                 } else {
-                    p.sendMessage("\u00a7e\u00a7l[CY] \u00a7f\u60a8\u7684" + label + "\u5c06\u572810\u5206\u949f\u540e\u8fc7\u671f\uff0c\u8bf7\u5c3d\u5feb\u7eed\u8d39\uff01");
+                    p.sendMessage("§e§l[CY] §f您的" + label + "将在10分钟后过期，请尽快续费！");
                 }
                 break;
             case 2:
                 if (autoRenew) {
-                    p.sendMessage("\u00a76\u00a7l[CY] \u00a7e\u00a7l\u6ce8\u610f\uff01\u00a7f\u60a8\u7684" + label + "\u5c06\u57285\u5206\u949f\u5185\u5230\u671f\uff0c\u81ea\u52a8\u7eed\u8d39\u5904\u7406\u4e2d...");
+                    p.sendMessage("§6§l[CY] §e§l注意！§f您的" + label + "将在5分钟内到期，自动续费处理中...");
                 } else {
-                    p.sendMessage("\u00a76\u00a7l[CY] \u00a7e\u00a7l\u6ce8\u610f\uff01\u00a7f\u60a8\u7684" + label + "\u5c06\u57285\u5206\u949f\u540e\u8fc7\u671f\uff01");
+                    p.sendMessage("§6§l[CY] §e§l注意！§f您的" + label + "将在5分钟后过期！");
                 }
                 p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 1.0f);
                 break;
             case 3:
-                String title = "\u00a7c\u00a7l\u26a0 \u5373\u5c06\u8fc7\u671f \u26a0";
-                String sub = "\u00a7e" + label + " \u5c06\u57283\u5206\u949f\u5185\u8fc7\u671f";
+                String title = "§c§l⚠ 即将过期 ⚠";
+                String sub = "§e" + label + " 将在3分钟内过期";
                 p.sendTitle(title, sub, 10, 60, 20);
-                p.sendMessage("\u00a7c\u00a7l[CY] \u00a7f\u00a7l\u7d27\u6025\uff01\u60a8\u7684" + label + "\u5c06\u57283\u5206\u949f\u5185\u8fc7\u671f\uff01" + (autoRenew ? " \u81ea\u52a8\u7eed\u8d39\u5904\u7406\u4e2d..." : " \u8bf7\u7acb\u5373\u7eed\u8d39\uff01"));
+                p.sendMessage("§c§l[CY] §f§l紧急！您的" + label + "将在3分钟内过期！" + (autoRenew ? " 自动续费处理中..." : " 请立即续费！"));
                 p.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 1.0f, 1.0f);
                 break;
         }
@@ -677,16 +751,21 @@ public class Main extends JavaPlugin
                     + "  data TEXT DEFAULT '',"
                     + "  plan_id TEXT DEFAULT '',"
                     + "  free_claimed INTEGER DEFAULT 0,"
-                    + "  auto_renew INTEGER DEFAULT 1)");
+                    + "  auto_renew INTEGER DEFAULT 1,"
+                    + "  bonds REAL DEFAULT 0)");          // ← 注意 auto_renew 那行末尾加逗号，bonds 接在后面
             st.execute("CREATE TABLE IF NOT EXISTS purchase_limits (player_name TEXT, item_id TEXT, count INTEGER DEFAULT 0, window_end INTEGER DEFAULT 0, PRIMARY KEY (player_name, item_id))");
             st.close();
             addColumnIfMissing("free_claimed", "INTEGER DEFAULT 0");
             addColumnIfMissing("plan_id", "TEXT DEFAULT ''");
             addColumnIfMissing("auto_renew", "INTEGER DEFAULT 1");
-            getLogger().info("[DB] \u521d\u59cb\u5316\u6210\u529f");
+            getLogger().info("[DB] 初始化成功");
         } catch (Exception e) {
-            getLogger().severe("[DB] \u521d\u59cb\u5316\u5931\u8d25: " + e.getMessage());
+            getLogger().severe("[DB] 初始化失败: " + e.getMessage());
         }
+        addColumnIfMissing("bonds", "REAL DEFAULT 0");
+
+
+
     }
 
     private void addColumnIfMissing(String col, String def) {
@@ -734,7 +813,7 @@ public class Main extends JavaPlugin
     private void checkDB() {
         try {
             if (db == null || db.isClosed()) {
-                getLogger().warning("[DB] \u8fde\u63a5\u4e22\u5931\uff0c\u91cd\u65b0\u521d\u59cb\u5316");
+                getLogger().warning("[DB] 连接丢失，重新初始化");
                 initDB();
             }
         } catch (SQLException e) {
@@ -878,6 +957,86 @@ public class Main extends JavaPlugin
             ps.executeUpdate();
             ps.close();
         } catch (SQLException ignored) {
+        }
+    }
+    /**
+     * 通过反射调用 bondManager 的方法
+     */
+    private Object invokeBond(String methodName, Class<?>[] paramTypes, Object[] args) {
+        if (!bondInited || bondManager == null) {
+            // 尝试重连
+            try {
+                org.bukkit.plugin.Plugin pl = Bukkit.getPluginManager().getPlugin("Sdf1_login");
+                if (pl != null && pl.isEnabled()) {
+                    java.lang.reflect.Field targetField = null;
+                    for (java.lang.reflect.Field f : pl.getClass().getDeclaredFields()) {
+                        if (f.getType().getName().contains("BondManager")) {
+                            targetField = f;
+                        }
+                    }
+                    if (targetField != null) {
+                        targetField.setAccessible(true);
+                        bondManager = targetField.get(pl);
+                        if (bondManager != null) bondInited = true;
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (!bondInited || bondManager == null) return null;
+        }
+        try {
+            java.lang.reflect.Method m = bondManager.getClass().getMethod(methodName, paramTypes);
+            return m.invoke(bondManager, args);
+        } catch (Exception e) {
+            getLogger().warning("[经济] 调用失败: " + methodName + " - " + e.getMessage());
+            return null;
+        }
+    }
+
+    // ===== 债券 - 读取余额 =====
+    private double getBondsFromSdf1(String name) {
+        try {
+            java.lang.reflect.Method m = bondManager.getClass().getMethod("getBonds", String.class);
+            Object r = m.invoke(bondManager, name);
+            return r instanceof Number ? ((Number) r).doubleValue() : 0;
+        } catch (Exception e) { return 0; }
+    }
+
+    private boolean withdrawFromSdf1(String name, double amount) {
+        try {
+            java.lang.reflect.Method m = bondManager.getClass().getMethod("deductBonds",
+                    String.class, int.class, String.class,
+                    String.class, String.class, String.class);
+            Object r = m.invoke(bondManager, name, (int) amount,
+                    "shop_buy", "", "CY商城", "购买商品");
+            return r instanceof Boolean && (Boolean) r;
+        } catch (Exception e) { return false; }
+    }
+
+    private void depositToSdf1(String name, double amount) {
+        try {
+            java.lang.reflect.Method m = bondManager.getClass().getMethod("addBonds",
+                    String.class, int.class, String.class,
+                    String.class, String.class, String.class);
+            m.invoke(bondManager, name, (int) amount,
+                    "admin_give", "", "CY管理", "后台充值");
+        } catch (Exception ignored) {}
+    }
+
+    // ===== 债券 - 冻结状态 =====
+    private boolean isBondFrozen(String name) {
+        getLogger().info("[调试] isBondFrozen被调用 name=" + name + " bondManager=" + (bondManager != null ? "非null" : "null") + " bondInited=" + bondInited);
+        if (bondManager == null) {
+            getLogger().warning("[调试] bondManager为null，无法检查冻结");
+            return false;
+        }
+        try {
+            java.lang.reflect.Method m = bondManager.getClass().getMethod("isFrozen", String.class);
+            Object r = m.invoke(bondManager, name);
+            getLogger().info("[调试] isFrozen返回: " + r);
+            return r instanceof Boolean && (Boolean) r;
+        } catch (Exception e) {
+            getLogger().severe("[调试] isFrozen异常: " + e.getMessage());
+            return false;
         }
     }
 
@@ -1104,74 +1263,74 @@ public class Main extends JavaPlugin
     }
 
     private String fmtLimitTime(long ms) {
-        if (ms <= 0) return "\u5df2\u7ed3\u675f";
+        if (ms <= 0) return "已结束";
         long totalSec = (ms + 999) / 1000;
-        if (totalSec <= 60) return totalSec + "\u79d2";
+        if (totalSec <= 60) return totalSec + "秒";
         long totalMin = (totalSec + 59) / 60;
         long hr = totalMin / 60;
         long min = totalMin % 60;
         if (hr >= 24) {
             long day = hr / 24;
             hr = hr % 24;
-            return day + "\u5929" + hr + "\u5c0f\u65f6";
+            return day + "天" + hr + "小时";
         }
-        if (hr > 0) return hr + "\u5c0f\u65f6" + min + "\u5206\u949f";
-        return totalMin + "\u5206\u949f";
+        if (hr > 0) return hr + "小时" + min + "分钟";
+        return totalMin + "分钟";
     }
 
-    private static final String LIMIT_UNIT_RE = "(\u5206\u949f|\u5206|\u5c0f\u65f6|\u65f6|\u5929|\u5468|\u6708|m|h|d|w|W)";
+    private static final String LIMIT_UNIT_RE = "(分钟|分|小时|时|天|周|月|m|h|d|w|W)";
 
     public static int[] parseLimitStrategy(String text) {
         if (text == null || text.trim().isEmpty()) return null;
         String t = text.trim();
-        if (t.equals("-1") || t.equals("\u65e0") || t.equals("\u4e0d\u9650\u8d2d")) return null;
-        if (t.startsWith("\u6bcf")) t = t.substring(1);
-        Matcher m0 = Pattern.compile(LIMIT_UNIT_RE + "\\D*?(\\d+)\\s*\u6b21").matcher(t);
+        if (t.equals("-1") || t.equals("无") || t.equals("不限购")) return null;
+        if (t.startsWith("每")) t = t.substring(1);
+        Matcher m0 = Pattern.compile(LIMIT_UNIT_RE + "\\D*?(\\d+)\\s*次").matcher(t);
         if (m0.find()) return new int[]{(int) getLimitUnitMs(m0.group(1)), Integer.parseInt(m0.group(2))};
-        Matcher m1 = Pattern.compile("(\\d+)\\s*" + LIMIT_UNIT_RE + "\\D*?(\\d+)\\s*\u6b21").matcher(t);
+        Matcher m1 = Pattern.compile("(\\d+)\\s*" + LIMIT_UNIT_RE + "\\D*?(\\d+)\\s*次").matcher(t);
         if (m1.find())
             return new int[]{(int) (Integer.parseInt(m1.group(1)) * getLimitUnitMs(m1.group(2))), Integer.parseInt(m1.group(3))};
-        Matcher m2 = Pattern.compile("(\\d+)\\s*\u6b21\\D*?(\\d+)\\s*" + LIMIT_UNIT_RE).matcher(t);
+        Matcher m2 = Pattern.compile("(\\d+)\\s*次\\D*?(\\d+)\\s*" + LIMIT_UNIT_RE).matcher(t);
         if (m2.find())
             return new int[]{(int) (Integer.parseInt(m2.group(2)) * getLimitUnitMs(m2.group(3))), Integer.parseInt(m2.group(1))};
-        Matcher m3 = Pattern.compile("(\\d+)\\s*\u6b21").matcher(t);
+        Matcher m3 = Pattern.compile("(\\d+)\\s*次").matcher(t);
         if (m3.find()) return new int[]{60000, Integer.parseInt(m3.group(1))};
         return null;
     }
 
     private static long getLimitUnitMs(String unit) {
-        if (unit.equals("\u5206\u949f") || unit.equals("\u5206") || unit.equals("m")) return 60000L;
-        if (unit.equals("\u5c0f\u65f6") || unit.equals("\u65f6") || unit.equals("h")) return 3600000L;
-        if (unit.equals("\u5929") || unit.equals("d")) return 86400000L;
-        if (unit.equals("\u5468") || unit.equals("w") || unit.equals("W")) return 604800000L;
-        if (unit.equals("\u6708")) return 2592000000L;
+        if (unit.equals("分钟") || unit.equals("分") || unit.equals("m")) return 60000L;
+        if (unit.equals("小时") || unit.equals("时") || unit.equals("h")) return 3600000L;
+        if (unit.equals("天") || unit.equals("d")) return 86400000L;
+        if (unit.equals("周") || unit.equals("w") || unit.equals("W")) return 604800000L;
+        if (unit.equals("月")) return 2592000000L;
         return 60000L;
     }
 
     public static long parseChineseTime(String text) {
         if (text == null || text.trim().isEmpty()) return 0;
         String t = text.trim().replaceAll("\\s+", "");
-        if (t.endsWith("\u5206\u949f") || t.endsWith("\u5206")) {
+        if (t.endsWith("分钟") || t.endsWith("分")) {
             String num = t.replaceAll("[^0-9]", "");
             if (!num.isEmpty()) return Long.parseLong(num) * 60000L;
             return 0;
         }
-        if (t.endsWith("\u5c0f\u65f6") || t.endsWith("\u65f6")) {
+        if (t.endsWith("小时") || t.endsWith("时")) {
             String num = t.replaceAll("[^0-9]", "");
             if (!num.isEmpty()) return Long.parseLong(num) * 3600000L;
             return 0;
         }
-        if (t.endsWith("\u5929")) {
+        if (t.endsWith("天")) {
             String num = t.replaceAll("[^0-9]", "");
             if (!num.isEmpty()) return Long.parseLong(num) * 86400000L;
             return 0;
         }
-        if (t.endsWith("\u5468")) {
+        if (t.endsWith("周")) {
             String num = t.replaceAll("[^0-9]", "");
             if (!num.isEmpty()) return Long.parseLong(num) * 604800000L;
             return 0;
         }
-        if (t.endsWith("\u6708")) {
+        if (t.endsWith("月")) {
             String num = t.replaceAll("[^0-9]", "");
             if (!num.isEmpty()) return Long.parseLong(num) * 2592000000L;
             return 0;
@@ -1191,17 +1350,17 @@ public class Main extends JavaPlugin
         if (hr >= 24) {
             long day = hr / 24;
             hr = hr % 24;
-            return day + "\u5929" + hr + "\u5c0f\u65f6";
+            return day + "天" + hr + "小时";
         }
-        if (hr > 0) return hr + "\u5c0f\u65f6" + min + "\u5206\u949f";
-        return totalMin + "\u5206\u949f";
+        if (hr > 0) return hr + "小时" + min + "分钟";
+        return totalMin + "分钟";
     }
 
 // ===== SECTION: 商品读取与保存 =====
 
     private void loadShop() {
         shopList.clear();
-        File f = new File(getDataFolder(), "\u5546\u54c1.txt");
+        File f = new File(getDataFolder(), "商品.txt");
         if (!f.exists()) {
             writeDefaultFile();
         }
@@ -1255,35 +1414,35 @@ public class Main extends JavaPlugin
                     cLimitDurationStr = "";
                     continue;
                 }
-                String[] kv = trimmed.replace("\uff1a", ":").split(":", 2);
+                String[] kv = trimmed.replace("：", ":").split(":", 2);
                 if (kv.length < 2) continue;
                 String k = kv[0].trim();
                 String v = kv[1].trim();
-                if (k.equals("\u7248\u672c\u53f7")) {
+                if (k.equals("版本号")) {
                     localVer = v;
                     continue;
                 }
-                if (k.equals("\u66f4\u65b0\u901a\u9053")) {
+                if (k.equals("更新通道")) {
                     updateCh = v;
                     continue;
                 }
-                if (k.equals("\u7ba1\u7406\u5bc6\u7801")) {
+                if (k.equals("管理密码")) {
                     adminPass = v;
                     continue;
                 }
-                if (k.equals("\u4e3b\u63a7\u63d2\u4ef6")) {
+                if (k.equals("主控插件")) {
                     masterPluginName = v;
                     continue;
                 }
-                if (k.equals("\u5171\u4eab\u5bc6\u94a5")) {
+                if (k.equals("共享密钥")) {
                     sharedSecret = v;
                     continue;
                 }
-                if (k.equals("\u7ba1\u7406\u56e2\u961f")) {
+                if (k.equals("管理团队")) {
                     adminTeam = v;
                     continue;
                 }
-                if (k.equals("\u7ba1\u7406\u6807\u7b7e")) {
+                if (k.equals("管理标签")) {
                     adminTag = v;
                     continue;
                 }
@@ -1292,10 +1451,10 @@ public class Main extends JavaPlugin
                         cId = v;
                         parsing = true;
                         break;
-                    case "\u54c1\u540d":
+                    case "品名":
                         cName = v;
                         break;
-                    case "\u5929\u6570": {
+                    case "天数": {
                         int[] range = parseRange(v);
                         if (range != null) {
                             cBlindBox = true;
@@ -1309,8 +1468,8 @@ public class Main extends JavaPlugin
                         }
                         break;
                     }
-                    case "\u683c\u5b50":
-                    case "\u683c\u53e3": {
+                    case "格子":
+                    case "格口": {
                         int[] range = parseRange(v);
                         if (range != null) {
                             cBlindBox = true;
@@ -1324,22 +1483,22 @@ public class Main extends JavaPlugin
                         }
                         break;
                     }
-                    case "\u4ef7\u683c":
+                    case "价格":
                         cPrice = parseDoubleSafe(v);
                         break;
-                    case "\u5e93\u5b58":
+                    case "库存":
                         cStock = parseIntSafe(v);
                         break;
-                    case "\u56fe\u6807":
+                    case "图标":
                         cIcon = parseMaterialSafe(v, Material.ENDER_CHEST);
                         break;
-                    case "\u56fe\u6807\u7269\u54c1":
+                    case "图标物品":
                         cLogoItem = v;
                         break;
-                    case "\u6298\u6263\u7ed3\u675f":
+                    case "折扣结束":
                         cDiscountEnd = v;
                         break;
-                    case "\u9650\u8d2d\u7b56\u7565": {
+                    case "限购策略": {
                         int[] parsed = parseLimitStrategy(v);
                         if (parsed != null) {
                             cLimitDuration = parsed[0];
@@ -1352,20 +1511,27 @@ public class Main extends JavaPlugin
                         }
                         break;
                     }
-                    case "\u9650\u8d2d\u6b21\u6570":
+                    case "限购次数":
                         cLimitCount = parseIntSafe(v);
                         break;
-                    case "\u9650\u8d2d\u65f6\u95f4":
+                    case "限购时间":
                         cLimitDurationStr = v;
                         cLimitDuration = parseChineseTime(v);
                         break;
+                    case "经济模式":
+                        economyMode = v.trim().toLowerCase();
+                        break;
+                    case "债券名称":
+                        bondName = v.trim();
+                        break;
+
                 }
             }
             if (parsing) {
                 shopList.add(new ShopItem(cId, cName, cDays, cSlots, cPrice, cStock, cIcon, cLogoItem, cDiscount, parseTs(cDiscountStart), parseTs(cDiscountEnd), cBlindBox, cMinDays, cMaxDays, cMinSlots, cMaxSlots));
             }
         } catch (Exception e) {
-            getLogger().severe("[\u5546\u54c1] \u52a0\u8f7d\u5f02\u5e38: " + e.getMessage());
+            getLogger().severe("[商品] 加载异常: " + e.getMessage());
         }
         stockMap.clear();
         for (ShopItem it : shopList) {
@@ -1379,85 +1545,162 @@ public class Main extends JavaPlugin
     }
 
     private void writeDefaultFile() {
-        File f = new File(getDataFolder(), "\u5546\u54c1.txt");
+        File f = new File(getDataFolder(), "商品.txt");
         if (f.exists() && f.length() > 0) return;
         try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(f), StandardCharsets.UTF_8))) {
-            pw.println("\u7248\u672c\u53f7: 1.0");
-            pw.println("\u66f4\u65b0\u901a\u9053: GE");
-            pw.println("\u7ba1\u7406\u5bc6\u7801: qweasd");
-            pw.println("\u4e3b\u63a7\u63d2\u4ef6: ");
-            pw.println("\u5171\u4eab\u5bc6\u94a5: ");
-            pw.println("\u7ba1\u7406\u56e2\u961f: ");
-            pw.println("\u7ba1\u7406\u6807\u7b7e: admin");
+            pw.println("版本号: 1.0");
+            pw.println("更新通道: GE");
+            pw.println("管理密码: qweasd");
+            pw.println("主控插件: ");
+            pw.println("共享密钥: ");
+            pw.println("管理团队: ");
+            pw.println("管理标签: admin");
+            pw.println("经济模式: bond");
+            pw.println("债券名称: 债券");
             pw.println();
             pw.println("ID: 100001");
-            pw.println("\u54c1\u540d: \u57fa\u7840\u683c\u5b50");
-            pw.println("\u5929\u6570: 7");
-            pw.println("\u683c\u5b50: 1");
-            pw.println("\u4ef7\u683c: 100");
-            pw.println("\u5e93\u5b58: 50");
-            pw.println("\u56fe\u6807: ENDER_CHEST");
-            pw.println("\u56fe\u6807\u7269\u54c1: ");
-            pw.println("\u6298\u6263: 1.0");
-            pw.println("\u6298\u6263\u5f00\u59cb: ");
-            pw.println("\u6298\u6263\u7ed3\u675f: ");
-            pw.println("\u9650\u8d2d\u7b56\u7565: -1");
+            pw.println("品名: 基础格子");
+            pw.println("天数: 7");
+            pw.println("格子: 1");
+            pw.println("价格: 100");
+            pw.println("库存: 50");
+            pw.println("图标: ENDER_CHEST");
+            pw.println("图标物品: ");
+            pw.println("折扣: 1.0");
+            pw.println("折扣开始: ");
+            pw.println("折扣结束: ");
+            pw.println("限购策略: -1");
             pw.println("--");
             pw.println();
             pw.println("ID: 200001");
-            pw.println("\u54c1\u540d: \u8c6a\u534e\u76f2\u76d2");
-            pw.println("\u5929\u6570: 7-30");
-            pw.println("\u683c\u5b50: 10-50");
-            pw.println("\u4ef7\u683c: 500");
-            pw.println("\u5e93\u5b58: -2");
-            pw.println("\u56fe\u6807: CHEST");
-            pw.println("\u56fe\u6807\u7269\u54c1: ");
-            pw.println("\u6298\u6263: 1.0");
-            pw.println("\u6298\u6263\u5f00\u59cb: ");
-            pw.println("\u6298\u6263\u7ed3\u675f: ");
+            pw.println("品名: 豪华盲盒");
+            pw.println("天数: 7-30");
+            pw.println("格子: 10-50");
+            pw.println("价格: 500");
+            pw.println("库存: -2");
+            pw.println("图标: CHEST");
+            pw.println("图标物品: ");
+            pw.println("折扣: 1.0");
+            pw.println("折扣开始: ");
+            pw.println("折扣结束: ");
             pw.println("--");
         } catch (IOException ignored) {
         }
     }
 
     private void saveShopFile() {
-        File f = new File(getDataFolder(), "\u5546\u54c1.txt");
+        File f = new File(getDataFolder(), "商品.txt");
         try (PrintWriter pw = new PrintWriter(new OutputStreamWriter(new FileOutputStream(f), StandardCharsets.UTF_8))) {
-            pw.println("\u7248\u672c\u53f7: " + localVer);
-            pw.println("\u66f4\u65b0\u901a\u9053: " + updateCh);
-            pw.println("\u7ba1\u7406\u5bc6\u7801: " + adminPass);
-            pw.println("\u4e3b\u63a7\u63d2\u4ef6: " + masterPluginName);
-            pw.println("\u5171\u4eab\u5bc6\u94a5: " + sharedSecret);
-            pw.println("\u7ba1\u7406\u56e2\u961f: " + adminTeam);
-            pw.println("\u7ba1\u7406\u6807\u7b7e: " + adminTag);
+            pw.println("版本号: " + localVer);
+            pw.println("更新通道: " + updateCh);
+            pw.println("管理密码: " + adminPass);
+            pw.println("主控插件: " + masterPluginName);
+            pw.println("共享密钥: " + sharedSecret);
+            pw.println("管理团队: " + adminTeam);
+            pw.println("管理标签: " + adminTag);
+            pw.println("经济模式: bond");
+            pw.println("债券名称: 债券");
+
             pw.println();
             for (ShopItem it : shopList) {
                 int st = stockMap.containsKey(it.getId()) ? stockMap.get(it.getId()) : it.getStock();
                 pw.println("ID: " + it.getId());
-                pw.println("\u54c1\u540d: " + it.getName());
+                pw.println("品名: " + it.getName());
                 if (it.isBlindBox()) {
-                    pw.println("\u5929\u6570: " + it.getMinDays() + "-" + it.getMaxDays());
-                    pw.println("\u683c\u5b50: " + it.getMinSlots() + "-" + it.getMaxSlots());
+                    pw.println("天数: " + it.getMinDays() + "-" + it.getMaxDays());
+                    pw.println("格子: " + it.getMinSlots() + "-" + it.getMaxSlots());
                 } else {
-                    pw.println("\u5929\u6570: " + it.getDays());
-                    pw.println("\u683c\u5b50: " + it.getSlots());
+                    pw.println("天数: " + it.getDays());
+                    pw.println("格子: " + it.getSlots());
                 }
-                pw.println("\u4ef7\u683c: " + (int) it.getPrice());
-                pw.println("\u5e93\u5b58: " + st);
-                pw.println("\u56fe\u6807: " + it.getLogo().name());
-                pw.println("\u56fe\u6807\u7269\u54c1: " + (it.hasCustomIcon() ? it.getLogoItem() : ""));
-                pw.println("\u6298\u6263: " + it.getDiscountRate());
-                pw.println("\u6298\u6263\u5f00\u59cb: " + (it.getDiscountStart() > 0 ? fmtDate(it.getDiscountStart()) : ""));
-                pw.println("\u6298\u6263\u7ed3\u675f: " + (it.getDiscountEnd() > 0 ? fmtDate(it.getDiscountEnd()) : ""));
+                pw.println("价格: " + (int) it.getPrice());
+                pw.println("库存: " + st);
+                pw.println("图标: " + it.getLogo().name());
+                pw.println("图标物品: " + (it.hasCustomIcon() ? it.getLogoItem() : ""));
+                pw.println("折扣: " + it.getDiscountRate());
+                pw.println("折扣开始: " + (it.getDiscountStart() > 0 ? fmtDate(it.getDiscountStart()) : ""));
+                pw.println("折扣结束: " + (it.getDiscountEnd() > 0 ? fmtDate(it.getDiscountEnd()) : ""));
                 if (it.getPurchaseLimit() > 0) {
-                    pw.println("\u9650\u8d2d\u7b56\u7565: " + it.getLimitDurationStr());
+                    pw.println("限购策略: " + it.getLimitDurationStr());
                 }
                 pw.println("--");
             }
         } catch (IOException e) {
-            getLogger().severe("[\u5546\u54c1] \u5199\u5165\u5931\u8d25: " + e.getMessage());
+            getLogger().severe("[商品] 写入失败: " + e.getMessage());
         }
     }
+    /** 获取玩家债券余额 */
+    private double getBonds(String name) {
+        if (db == null) {
+            getLogger().info("[调试] db为null");
+            return 0;
+        }
+        try {
+            PreparedStatement ps = db.prepareStatement(
+                    "SELECT bonds FROM members WHERE player_name=?");
+            ps.setString(1, name);
+            ResultSet rs = ps.executeQuery();
+            boolean hasRow = rs.next();
+            double val = hasRow ? rs.getDouble("bonds") : 0;
+            getLogger().info("[调试] getBonds: name=" + name
+                    + " hasRow=" + hasRow + " val=" + val);
+            rs.close(); ps.close();
+            return val;
+        } catch (Exception e) {
+            getLogger().severe("[调试] getBonds异常: " + e.getMessage());
+            return 0;
+        }
+    }
+
+
+    /** 设置玩家债券余额 */
+    private void setBonds(String name, double amount) {
+        if (db == null) return;
+        ensureMember(name);
+        try {
+            PreparedStatement ps = db.prepareStatement(
+                    "UPDATE members SET bonds=? WHERE player_name=?");
+            ps.setDouble(1, Math.max(0, amount));
+            ps.setString(2, name);
+            ps.executeUpdate(); ps.close();
+        } catch (SQLException ignored) {}
+    }
+
+    /** 增加债券（充值/发放） */
+    private void addBonds(String name, double amount) {
+        setBonds(name, getBonds(name) + amount);
+    }
+
+    /** 扣除债券（购买扣款），返回是否成功 */
+    private boolean withdrawBonds(String name, double amount) {
+        double cur = getBonds(name);
+        if (cur < amount) return false;
+        setBonds(name, cur - amount);
+        return true;
+    }
+
+    /** 给债券（收入） */
+    private void depositBonds(String name, double amount) {
+        addBonds(name, amount);
+    }
+    /** 判断当前经济模式是否为债券 */
+    private boolean isBondMode() {
+        return "bond".equalsIgnoreCase(economyMode);
+    }
+
+    private double getBalance(String name) {
+        getLogger().info("[调试] getBalance被调用 name=" + name + " isBondMode=" + isBondMode() + " bondInited=" + bondInited);
+        if (isBondMode()) {
+            double val = getBondsFromSdf1(name);
+            getLogger().info("[调试] 债券余额=" + val + " bondManager=" + (bondManager != null ? "非null" : "null"));
+            return val;
+        } else {
+            if (economy == null) return 0;
+            org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(name);
+            return economy.getBalance(op);
+        }
+    }
+
 
     private ShopItem findItemById(String id) {
         for (ShopItem it : shopList) {
@@ -1663,13 +1906,13 @@ private ItemStack makeLockedPane(Player p) {
     }
 
     private String fmtTime(long expire) {
-        if (expire == 0) return "\u7ec8\u8eab";
+        if (expire == 0) return "终身";
         long now = System.currentTimeMillis();
-        if (expire <= now) return "\u5df2\u8fc7\u671f";
+        if (expire <= now) return "已过期";
         long r = expire - now;
         long d = r / 86400000L;
         long h = (r % 86400000L) / 3600000L;
-        return d > 0 ? d + "\u5929" + h + "\u5c0f\u65f6" : h + "\u5c0f\u65f6";
+        return d > 0 ? d + "天" + h + "小时" : h + "小时";
     }
 
     private String fmtDate(long ts) {
@@ -1679,7 +1922,7 @@ private ItemStack makeLockedPane(Player p) {
 
     private boolean isCancel(String msg) {
         String m = msg.toLowerCase().trim();
-        return m.equals("0") || m.equals("exit") || m.equals("\u9000\u51fa");
+        return m.equals("0") || m.equals("exit") || m.equals("退出");
     }
 
     private long parseTimeInput(String text) {
@@ -1785,17 +2028,17 @@ private ItemStack makeLockedPane(Player p) {
             st.close();
         } catch (Exception ignored) {
         }
-        s.sendMessage("\u00a7e[CY] \u00a7fv" + localVer + " \u6210\u5458:" + c + " \u683c\u5b50:" + t + " \u5546\u54c1:" + shopList.size());
-        s.sendMessage("\u00a7e[CY] \u00a7f\u4e3b\u63a7: " + (masterInstance != null ? "\u00a7a\u5df2\u8fde\u63a5" : "\u00a7c\u672a\u8fde\u63a5"));
+        s.sendMessage("§e[CY] §fv" + localVer + " 成员:" + c + " 格子:" + t + " 商品:" + shopList.size());
+        s.sendMessage("§e[CY] §f主控: " + (masterInstance != null ? "§a已连接" : "§c未连接"));
     }
 
     private void showInfo(CommandSender s, String n) {
         Map<String, Object> m = getMember(n);
         if (m.isEmpty() || !(Boolean) m.get("_exists")) {
-            s.sendMessage("\u00a7c" + n + " \u4e0d\u662f\u6210\u5458");
+            s.sendMessage("§c" + n + " 不是成员");
             return;
         }
-        s.sendMessage("\u00a7e" + n + ": \u6c38\u4e4d=" + ((Number) m.get("perm")).intValue() + " \u4f1a\u5458=" + ((Number) m.get("mem")).intValue() + " \u8fc7\u671f=" + fmtTime(((Number) m.get("exp")).longValue()));
+        s.sendMessage("§e" + n + ": 永乍=" + ((Number) m.get("perm")).intValue() + " 会员=" + ((Number) m.get("mem")).intValue() + " 过期=" + fmtTime(((Number) m.get("exp")).longValue()));
     }
 
     private int totalSlots(Map<String, Object> m) {
@@ -1859,35 +2102,17 @@ public String onSdf1GetShopItems() {
     public String onSdf1Ping() {
         return "CY_beibao v" + (localVer != null ? localVer : "1.0") + " members=" + memberCount() + " shop=" + shopList.size();
     }
-   /* public String onSdf1GetShopItems() {
-        StringBuilder sb = new StringBuilder();
-        for (ShopItem it : shopList) {
-            int st = stockMap.containsKey(it.getId())
-                    ? stockMap.get(it.getId()) : it.getStock();
-            if (st == -1) continue;
-            sb.append(it.getId()).append("|")
-                    .append(it.getName()).append("|")
-                    .append(it.getDays()).append("|")
-                    .append(it.getSlots()).append("|")
-                    .append((int) it.getPrice()).append("|")
-                    .append(st).append("|")
-                    .append(it.getLogo().name()).append("|")
-                    .append(it.isLifetime() ? "1" : "0")
-                    .append(";");
-        }
-        return sb.toString();
-    }
-*/
-    public boolean onSdf1Activation(String name, int slots, int days) {
-        try {
-            if (days > 0) upsert(name, 0, slots, days, "");
-            else upsert(name, slots, 0, 0, "");
-            return true;
-        } catch (Exception e) {
-            getLogger().severe("[\u8054\u63a7] \u6fc0\u6d3b\u5931\u8d25: " + e.getMessage());
-            return false;
-        }
-    }
+
+   public boolean onSdf1Activation(String name, int slots, int days) {
+       try {
+           if (days > 0) upsert(name, 0, slots, days, "");
+           else upsert(name, slots, 0, 0, "");
+           return true;
+       } catch (Exception e) {
+           getLogger().severe("[联控] 激活失败: " + e.getMessage());
+           return false;
+       }
+   }
 
     public boolean onSdf1Verify(String secret) {
         if (sharedSecret == null || sharedSecret.isEmpty()) return true;
@@ -1934,20 +2159,20 @@ public String onSdf1GetShopItems() {
             if (verifyM != null && sharedSecret != null && !sharedSecret.isEmpty()) {
                 Object result = verifyM.invoke(plugin, sharedSecret);
                 if (Boolean.FALSE.equals(result)) {
-                    getLogger().warning("[\u5171\u4eab] \u5bc6\u94a5\u9a8c\u8bc1\u5931\u8d25\uff01");
+                    getLogger().warning("[共享] 密钥验证失败！");
                     return;
                 }
             }
             if (pingM != null) {
                 String result = (String) pingM.invoke(plugin);
-                getLogger().info("[\u5171\u4eab] \u4e3b\u63a7\u53d1\u73b0\u6210\u529f: " + result);
+                getLogger().info("[共享] 主控发现成功: " + result);
             }
             masterInstance = plugin;
             masterPingMethod = pingM;
             masterActMethod = actM;
             masterVerifyMethod = verifyM;
         } catch (Exception e) {
-            getLogger().warning("[\u5171\u4eab] \u4e3b\u63a7\u53d1\u73b0\u5f02\u5e38: " + e.getMessage());
+            getLogger().warning("[共享] 主控发现异常: " + e.getMessage());
             masterInstance = null;
         }
     }
@@ -2740,10 +2965,20 @@ public String onSdf1GetShopItems() {
 // ===== SECTION: 购买逻辑 =====
 
     private void buy(Player p, ShopItem item) {
-        if (economy == null) {
+        if (!isBondMode() && economy == null) {
             p.sendMessage("§c§l[商城] §f经济不可用！");
             return;
         }
+
+    //    getLogger().info("[调试] buy进入购买流程 player=" + p.getName());
+
+        // 第一道：冻结检查
+        if (isBondMode() && isBondFrozen(p.getName())) {
+        //   getLogger().info("[调试] 冻结检查拦截了购买");
+            p.sendMessage("§c§l[商城] §f",getName(),"无法购买！");
+            return;
+        }
+
         if (item.isBlindBox()) {
             openBox(p, item);
             return;
@@ -2781,15 +3016,27 @@ public String onSdf1GetShopItems() {
             return;
         }
         double ep = item.getEffectivePrice();
-        if (!economy.has(p, ep)) {
-            double bal = economy.getBalance(p);
-            p.sendMessage("§c§l[商城] §f余额不足！");
+
+        // 第二道：余额检查
+        if (!hasEnough(p.getName(), ep)) {
+            double bal = getBalance(p.getName());
+    //        getLogger().info("[调试] 余额检查拦截了购买");
+            p.sendMessage("§c§l[商城] §f你的余额不足！");
             p.sendMessage("§7价格: §e$" + fmt(ep)
                     + " §7余额: §a$" + fmt(bal)
                     + " §7差: §c$" + fmt(ep - bal));
             return;
         }
-        economy.withdrawPlayer(p, ep);
+
+        // 第三道：扣款并检查结果
+        if (!withdraw(p.getName(), ep)) {
+        //    getLogger().info("[调试] 扣款失败，拦截了购买");
+            p.sendMessage("§c§l[商城] §f扣款失败！", p.getName());
+            return;
+        }
+
+   //     getLogger().info("[调试] 扣款成功，继续发放");
+
         lastPurchase.put(p.getUniqueId(), System.currentTimeMillis());
         lastItemPurchase.put(itemKey, System.currentTimeMillis());
         ensureMember(p.getName());
@@ -2814,14 +3061,20 @@ public String onSdf1GetShopItems() {
                 + " | " + tl + " | +" + item.getSlots()
                 + "格 | §c-$" + fmt(ep)
                 + " §7余额: §a$"
-                + fmt(economy.getBalance(p)));
+                + fmt(getBalance(p.getName())));
     }
+
 
 // ===== SECTION: 购买逻辑 - 盲盒 =====
 
     private void openBox(Player p, ShopItem item) {
-        if (economy == null) {
+        if (!isBondMode() && economy == null) {
             p.sendMessage("§c§l[商城] §f经济不可用！");
+            return;
+        }
+        // ===== 新增：债券冻结检查 =====
+        if (isBondMode() && isBondFrozen(p.getName())) {
+            p.sendMessage("§c§l[商城] §f你的账户已被冻结，无法购买！");
             return;
         }
         int st = stockMap.containsKey(item.getId())
@@ -2857,11 +3110,23 @@ public String onSdf1GetShopItems() {
             return;
         }
         double ep = item.getEffectivePrice();
-        if (!economy.has(p, ep)) {
+        // 第二道：余额检查
+        if (!hasEnough(p.getName(), ep)) {
+            double bal = getBalance(p.getName());
+            getLogger().info("[调试] 余额检查拦截了购买");
             p.sendMessage("§c§l[商城] §f余额不足！");
+            p.sendMessage("§7价格: §e$" + fmt(ep)
+                    + " §7余额: §a$" + fmt(bal)
+                    + " §7差: §c$" + fmt(ep - bal));
             return;
         }
-        economy.withdrawPlayer(p, ep);
+
+        // ===== 修改：检查扣款是否成功 =====
+        if (!withdraw(p.getName(), ep)) {
+            p.sendMessage("§c§l[商城] §f扣款失败！");
+            return;
+        }
+        withdraw(p.getName(), ep);
         lastPurchase.put(p.getUniqueId(), System.currentTimeMillis());
         lastItemPurchase.put(itemKey, System.currentTimeMillis());
 
