@@ -2215,7 +2215,10 @@ public String onSdf1GetShopItems() {
             con.setConnectTimeout(5000);
             con.setReadTimeout(5000);
             con.setRequestProperty("User-Agent",
-                    "CY_beibao-Updater");
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            con.setRequestProperty("Accept", "*/*");
+            con.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
             BufferedReader br = new BufferedReader(
                     new InputStreamReader(con.getInputStream()));
             StringBuilder sb = new StringBuilder();
@@ -2251,10 +2254,15 @@ public String onSdf1GetShopItems() {
     }
 
 
-    private void checkUpdate(final CommandSender manual) {
-        String checkingMsg = "[CY] 正在检查更新...";
+    // ★ 供集群更新调用
+    public UpdateChecker getUpdateChecker() {
+        return new UpdateChecker(this);
+    }
+
+    public void checkUpdate(final CommandSender manual) {
+        String checkingMsg = "[CY_beibao] 正在检查更新...";
         getLogger().info(checkingMsg);
-        if (manual != null) manual.sendMessage(checkingMsg);
+        if (manual != null) manual.sendMessage("§e[CY_beibao] 正在检查更新...");
         new Thread(() -> {
             try {
                 boolean preferGH = "GH".equalsIgnoreCase(updateCh) || updateCh.isEmpty();
@@ -2268,25 +2276,25 @@ public String onSdf1GetShopItems() {
                 String[] res = fetchRelease(pApi, pName);
                 if (res != null) {
                     String linkMsg = "[更新] " + pName + " 最新版本: " + res[0] + " | 下载: " + pDl;
-                    getLogger().info(linkMsg);
+                    Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §e" + linkMsg);
                     if (manual != null)
-                        manual.sendMessage("§a[更新] §f" + pName + " 最新版本: §e" + res[0] + " §f| 下载: §b" + pDl);
+                        manual.sendMessage("§a[CY_beibao] [更新] §f" + pName + " 最新版本: §e" + res[0] + " §f| 下载: §b§l" + pDl);
                     applyUpdate(res[0], res[1], pDl, manual, pName);
                     return;
                 }
-                getLogger().info("[更新] " + pName + " 失败，切换 " + bName);
+                Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §e[更新] " + pName + " 失败，切换 " + bName);
 
                 res = fetchRelease(bApi, bName);
                 if (res != null) {
                     String linkMsg = "[更新] " + bName + " 最新版本: " + res[0] + " | 下载: " + bDl;
-                    getLogger().info(linkMsg);
+                    Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §e" + linkMsg);
                     if (manual != null)
-                        manual.sendMessage("§a[更新] §f" + bName + " 最新版本: §e" + res[0] + " §f| 下载: §b" + bDl);
+                        manual.sendMessage("§a[CY_beibao] [更新] §f" + bName + " 最新版本: §e" + res[0] + " §f| 下载: §b§l" + bDl);
                     applyUpdate(res[0], res[1], bDl, manual, bName);
                     return;
                 }
-                getLogger().info("[更新] 双路均失败");
-                if (manual != null) manual.sendMessage("§c[更新] §f检查失败");
+                Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §c[更新] 双路均失败");
+                if (manual != null) manual.sendMessage("§c[CY_beibao] [更新] §f检查失败");
             } catch (Exception e) {
                 getLogger().warning("[更新] " + e.getMessage());
             }
@@ -2300,43 +2308,28 @@ public String onSdf1GetShopItems() {
                              String source) {
         this.remoteVer = remoteVersion;
         try {
-            String[] lp = localVer.split("\\.");
-            String[] rp = remoteVersion.split("\\.");
-            int lMaj = lp.length > 0
-                    ? Integer.parseInt(lp[0]) : 0;
-            int lMin = lp.length > 1
-                    ? Integer.parseInt(lp[1]) : 0;
-            int lPat = lp.length > 2
-                    ? Integer.parseInt(lp[2]) : 0;
-            int rMaj = rp.length > 0
-                    ? Integer.parseInt(rp[0]) : 0;
-            int rMin = rp.length > 1
-                    ? Integer.parseInt(rp[1]) : 0;
-            int rPat = rp.length > 2
-                    ? Integer.parseInt(rp[2]) : 0;
-            boolean newer = rMaj > lMaj
-                    || (rMaj == lMaj && rMin > lMin)
-                    || (rMaj == lMaj && rMin == lMin
-                    && rPat > lPat);
+            // 版本比较：远程≠本地即视为有更新（用户即将推新版本）
+            boolean newer = !remoteVersion.trim().equals(localVer.trim());
             if (!newer) {
-                getLogger().info("[更新] 当前已是最新版本 ("
+                // 使用Bukkit.getConsoleSender().sendMessage()输出彩色日志
+                Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §7当前已是最新版本 §f("
                         + localVer + ")");
                 if (manual != null)
                     manual.sendMessage(
-                            "§a[更新] §f当前已是最新版本 §e"
+                            "§a[CY_beibao] [更新] §f当前已是最新版本 §e"
                                     + localVer);
                 return;
             }
-            getLogger().info("[更新] 发现新版本: "
+            Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §e发现新版本: "
                     + remoteVersion + " (当前: " + localVer
-                    + ") | 下载: " + downloadUrl);
+                    + ") | §b下载: " + downloadUrl);
             for (Player op : Bukkit.getOnlinePlayers()) {
                 if (isAdmin(op)) {
                     op.sendMessage(
-                            "§a§l[更新] §f发现新版本: §e"
+                            "§a§l[CY_beibao] [更新] §f发现新版本: §e"
                                     + remoteVersion
                                     + " §f(当前: " + localVer + ")");
-                    op.sendMessage("§7下载: §b" + downloadUrl);
+                    op.sendMessage("§7下载: §b§l" + downloadUrl);
                     if (changelog != null
                             && !changelog.isEmpty()) {
                         op.sendMessage("§7更新说明:");
@@ -2349,6 +2342,29 @@ public String onSdf1GetShopItems() {
         } catch (Exception e) {
             getLogger().warning("[更新] 版本比较失败: "
                     + e.getMessage());
+        }
+    }
+
+    // 正确的版本比较方法
+    private boolean isNewerVersion(String remote, String local) {
+        if (remote == null || local == null) return false;
+        String[] remoteParts = remote.trim().split("\\.");
+        String[] localParts = local.trim().split("\\.");
+        int len = Math.max(remoteParts.length, localParts.length);
+        for (int i = 0; i < len; i++) {
+            int r = i < remoteParts.length ? parseVersionNum(remoteParts[i]) : 0;
+            int l = i < localParts.length ? parseVersionNum(localParts[i]) : 0;
+            if (r > l) return true;   // 远程 > 本地：有新版本
+            if (r < l) return false;  // 远程 < 本地：本地更新
+        }
+        return false; // 版本相同：已是最新
+    }
+
+    private int parseVersionNum(String s) {
+        try {
+            return Integer.parseInt(s.replaceAll("[^0-9]", ""));
+        } catch (Exception e) {
+            return 0;
         }
     }
 
@@ -2673,6 +2689,24 @@ public String onSdf1GetShopItems() {
                 return;
             }
 
+            // ★ 宝箱物品拦截（事不过三）
+            if (cursor != null
+                    && cursor.getType() != Material.AIR
+                    && isTreasureItem(cursor)) {
+                e.setCancelled(true);
+                boolean confiscate = handleTreasureItemDiscard(p, cursor);
+                if (confiscate) {
+                    // 第三次：没收
+                    cursor.setAmount(0);
+                    p.getOpenInventory().setCursor(null);
+                } else {
+                    // 前两次：退回背包
+                    p.getOpenInventory().setCursor(null);
+                    p.getInventory().addItem(cursor.clone());
+                }
+                return;
+            }
+
             // Shift：仓库 → 背包
             if (e.isShiftClick()) {
                 if (slotItem == null
@@ -2716,6 +2750,17 @@ public String onSdf1GetShopItems() {
                     || clicked.getType() == Material.AIR) return;
             if (isShopIcon(clicked)
                     || isLockedPane(p, clicked)) return;
+            
+            // ★ 宝箱物品拦截（事不过三）
+            if (isTreasureItem(clicked)) {
+                boolean confiscate = handleTreasureItemDiscard(p, clicked);
+                if (confiscate) {
+                    // 第三次：没收
+                    clicked.setAmount(0);
+                    e.getClickedInventory().setItem(e.getSlot(), null);
+                }
+                return;
+            }
 
             UUID u = p.getUniqueId();
             int pg = pageMap.getOrDefault(u, 1);
@@ -3425,6 +3470,22 @@ public String onSdf1GetShopItems() {
                 e.setCancelled(true);
                 return;
             }
+            // ★ 宝箱物品拦截（事不过三）
+            if (dragged != null
+                    && dragged.getType() != Material.AIR
+                    && isTreasureItem(dragged)) {
+                e.setCancelled(true);
+                boolean confiscate = handleTreasureItemDiscard(p, dragged);
+                if (confiscate) {
+                    // 第三次：没收
+                    dragged.setAmount(0);
+                    p.getOpenInventory().setCursor(null);
+                } else {
+                    // 前两次：退回背包
+                    p.getInventory().addItem(dragged.clone());
+                }
+                return;
+            }
             for (int slot : e.getRawSlots()) {
                 if (slot < topSize && slot >= us) {
                     e.setCancelled(true);
@@ -3646,13 +3707,90 @@ public String onSdf1GetShopItems() {
                              String label, String[] args) {
         if (!cmd.getName().equalsIgnoreCase("cy")) return false;
 
-        // 控制台支持 /cy stat
+        // 控制台支持的命令（白名单）
         if (!(sender instanceof Player)) {
-            if (args.length > 0 && args[0].equalsIgnoreCase("stat")) {
+            if (args.length == 0) {
+                sender.sendMessage("§c控制台用法: /cy <stat|reload|update|add|set|remove>");
+                return true;
+            }
+            String sub = args[0].toLowerCase();
+            if (sub.equals("stat")) {
                 showStat(sender);
                 return true;
             }
-            sender.sendMessage("§c仅玩家可使用此命令");
+            if (sub.equals("reload")) {
+                loadShop();
+                sender.sendMessage("§a[管理] §f商品配置已重载！共"
+                        + shopList.size() + "件商品");
+                return true;
+            }
+            if (sub.equals("update")) {
+                checkUpdate(null);
+                return true;
+            }
+            // 库存管理命令（控制台+玩家通用）
+            if (sub.equals("add") || sub.equals("set") || sub.equals("remove")) {
+                if (args.length < 3) {
+                    sender.sendMessage("§e用法: /cy " + sub + " <商品ID> <数量>");
+                    return true;
+                }
+                ShopItem item = findItem(args[1]);
+                if (item == null) {
+                    sender.sendMessage("§c[管理] §f未找到商品: " + args[1]);
+                    return true;
+                }
+                int amount = parseIntSafe(args[2]);
+                int oldStock = item.getStock();
+                if (sub.equals("add")) {
+                    if (amount <= 0) {
+                        sender.sendMessage("§c[管理] §f数量必须大于0");
+                        return true;
+                    }
+                    if (oldStock == -2) {
+                        sender.sendMessage("§c[管理] §f该商品库存无限，无需增加");
+                        return true;
+                    }
+                    if (oldStock == -1) {
+                        sender.sendMessage("§c[管理] §f该商品已下架，无法增加库存");
+                        return true;
+                    }
+                    int newStock = (oldStock < 0 ? 0 : oldStock) + amount;
+                    item.setStock(newStock);
+                    stockMap.put(item.getId(), newStock);
+                    sender.sendMessage("§a[管理] §f" + item.getName()
+                            + " 库存: " + oldStock + " → " + newStock);
+                } else if (sub.equals("set")) {
+                    item.setStock(amount);
+                    stockMap.put(item.getId(), amount);
+                    String desc;
+                    if (amount == -1) desc = "下架";
+                    else if (amount == -2) desc = "无限";
+                    else if (amount == 0) desc = "售罄";
+                    else desc = String.valueOf(amount);
+                    sender.sendMessage("§a[管理] §f" + item.getName()
+                            + " 库存: " + oldStock + " → " + desc);
+                } else { // remove
+                    if (amount <= 0) {
+                        sender.sendMessage("§c[管理] §f数量必须大于0");
+                        return true;
+                    }
+                    if (oldStock == -2) {
+                        sender.sendMessage("§c[管理] §f该商品库存无限，无需减少");
+                        return true;
+                    }
+                    if (oldStock == -1) {
+                        sender.sendMessage("§c[管理] §f该商品已下架");
+                        return true;
+                    }
+                    int newStock = Math.max(0, oldStock - amount);
+                    item.setStock(newStock);
+                    stockMap.put(item.getId(), newStock);
+                    sender.sendMessage("§a[管理] §f" + item.getName()
+                            + " 库存: " + oldStock + " → " + newStock);
+                }
+                return true;
+            }
+            sender.sendMessage("§c控制台仅支持: stat, reload, update, add, set, remove");
             return true;
         }
 
@@ -3795,9 +3933,113 @@ public String onSdf1GetShopItems() {
                             + " 的所有限购");
                 }
                 return true;
+            case "add":
+                // /cy add <商品ID> <数量> — 增加库存
+                if (!isAdmin(p)) {
+                    p.sendMessage("§c§l[CY] §f你没有权限！");
+                    return true;
+                }
+                if (args.length < 3) {
+                    p.sendMessage("§e用法: /cy add <商品ID> <数量>");
+                    return true;
+                }
+                {
+                    ShopItem addTarget = findItem(args[1]);
+                    if (addTarget == null) {
+                        p.sendMessage("§c[管理] §f未找到商品: " + args[1]);
+                        return true;
+                    }
+                    int addAmt = parseIntSafe(args[2]);
+                    if (addAmt <= 0) {
+                        p.sendMessage("§c[管理] §f数量必须大于0");
+                        return true;
+                    }
+                    int curStock = addTarget.getStock();
+                    if (curStock == -2) {
+                        p.sendMessage("§c[管理] §f该商品库存无限，无需增加");
+                        return true;
+                    }
+                    if (curStock == -1) {
+                        p.sendMessage("§c[管理] §f该商品已下架，无法增加库存");
+                        return true;
+                    }
+                    int newStock = (curStock < 0 ? 0 : curStock) + addAmt;
+                    addTarget.setStock(newStock);
+                    stockMap.put(addTarget.getId(), newStock);
+                    p.sendMessage("§a[管理] §f" + addTarget.getName()
+                            + " 库存: " + curStock + " → " + newStock);
+                }
+                return true;
+            case "set":
+                // /cy set <商品ID> <数量> — 设置库存（-1下架, -2无限, 0售罄, >0有库存）
+                if (!isAdmin(p)) {
+                    p.sendMessage("§c§l[CY] §f你没有权限！");
+                    return true;
+                }
+                if (args.length < 3) {
+                    p.sendMessage("§e用法: /cy set <商品ID> <数量>");
+                    p.sendMessage("§7数量: -1=下架, -2=无限, 0=售罄, >0=库存");
+                    return true;
+                }
+                {
+                    ShopItem setTarget = findItem(args[1]);
+                    if (setTarget == null) {
+                        p.sendMessage("§c[管理] §f未找到商品: " + args[1]);
+                        return true;
+                    }
+                    int setStock = parseIntSafe(args[2]);
+                    int oldStock = setTarget.getStock();
+                    setTarget.setStock(setStock);
+                    stockMap.put(setTarget.getId(), setStock);
+                    String desc;
+                    if (setStock == -1) desc = "下架";
+                    else if (setStock == -2) desc = "无限";
+                    else if (setStock == 0) desc = "售罄";
+                    else desc = String.valueOf(setStock);
+                    p.sendMessage("§a[管理] §f" + setTarget.getName()
+                            + " 库存: " + oldStock + " → " + desc);
+                }
+                return true;
+            case "remove":
+                // /cy remove <商品ID> <数量> — 减少库存
+                if (!isAdmin(p)) {
+                    p.sendMessage("§c§l[CY] §f你没有权限！");
+                    return true;
+                }
+                if (args.length < 3) {
+                    p.sendMessage("§e用法: /cy remove <商品ID> <数量>");
+                    return true;
+                }
+                {
+                    ShopItem rmTarget = findItem(args[1]);
+                    if (rmTarget == null) {
+                        p.sendMessage("§c[管理] §f未找到商品: " + args[1]);
+                        return true;
+                    }
+                    int rmAmt = parseIntSafe(args[2]);
+                    if (rmAmt <= 0) {
+                        p.sendMessage("§c[管理] §f数量必须大于0");
+                        return true;
+                    }
+                    int rmCur = rmTarget.getStock();
+                    if (rmCur == -2) {
+                        p.sendMessage("§c[管理] §f该商品库存无限，无需减少");
+                        return true;
+                    }
+                    if (rmCur == -1) {
+                        p.sendMessage("§c[管理] §f该商品已下架");
+                        return true;
+                    }
+                    int rmNew = Math.max(0, rmCur - rmAmt);
+                    rmTarget.setStock(rmNew);
+                    stockMap.put(rmTarget.getId(), rmNew);
+                    p.sendMessage("§a[管理] §f" + rmTarget.getName()
+                            + " 库存: " + rmCur + " → " + rmNew);
+                }
+                return true;
 
             default:
-                p.sendMessage("§e[CY] §f用法: /cy <open|shop|storage|admin|stat|info|give|take|setexpire|reload|update>");
+                p.sendMessage("§e[CY] §f用法: /cy <open|shop|storage|admin|stat|info|give|take|setexpire|reload|update|add|set|remove>");
                 return true;
         }
     }
@@ -3814,19 +4056,22 @@ public String onSdf1GetShopItems() {
         if (args.length == 1) {
             opts.addAll(Arrays.asList("open", "shop", "storage",
                     "admin", "stat", "info", "give", "take",
-                    "setexpire", "reload", "update", "reset"));
+                    "setexpire", "reload", "update", "reset",
+                    "add", "set", "remove"));
         } else if (args.length == 2) {
             String sub = args[0].toLowerCase();
             if (sub.equals("info") || sub.equals("give")
                     || sub.equals("take") || sub.equals("setexpire")
-                    || sub.equals("reset")) {
+                    || sub.equals("reset") || sub.equals("add")
+                    || sub.equals("set") || sub.equals("remove")) {
                 for (Player op : Bukkit.getOnlinePlayers()) {
                     opts.add(op.getName());
                 }
             }
         } else if (args.length == 3) {
             String sub = args[0].toLowerCase();
-            if (sub.equals("reset")) {
+            if (sub.equals("reset") || sub.equals("add")
+                    || sub.equals("set") || sub.equals("remove")) {
                 for (ShopItem it : shopList) {
                     opts.add(it.getId());
                     opts.add(it.getName());
@@ -3834,5 +4079,56 @@ public String onSdf1GetShopItems() {
             }
         }
         return filterTab(opts, args[args.length - 1]);
+    }
+
+    /**
+     * 检查物品是否是Sdf1_game宝箱自定义物品
+     * Sdf1_game的宝箱物品lore中包含"§0§k"标记
+     */
+    private boolean isTreasureItem(ItemStack item) {
+        if (item == null) return false;
+        if (!item.hasItemMeta()) return false;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return false;
+        if (!meta.hasLore()) return false;
+        List<String> lore = meta.getLore();
+        if (lore == null) return false;
+        for (String line : lore) {
+            // Sdf1_game宝箱物品标记格式: §0§kCUSTOM|玩家|...
+            // 同时检查两种标记格式
+            if (line.contains("CUSTOM")
+                    || line.contains("\u00a70\u00a7k")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 宝箱物品三振计数器（按物品单独计数）
+    private final Map<String, Integer> treasureDiscardCount = new ConcurrentHashMap<>();
+
+    /**
+     * 处理宝箱物品三振规则
+     * @return true=应该没收, false=应该警告退回
+     */
+    private boolean handleTreasureItemDiscard(Player p, ItemStack item) {
+        UUID uid = p.getUniqueId();
+        // 按物品类型单独计数（玩家UUID+物品类型）
+        String itemKey = uid + ":" + item.getType().name();
+        int count = treasureDiscardCount.getOrDefault(itemKey, 0) + 1;
+        treasureDiscardCount.put(itemKey, count);
+        if (count < 3) {
+            // 前两次：警告 + 踢回背包
+            p.sendMessage("§c§l[防护] §f该物品是宝箱自定义物品，"
+                    + "禁止存入仓库！"
+                    + "§7（第" + count + "/3次警告）");
+            return false;
+        } else {
+            // 第三次：直接没收
+            p.sendMessage("§c§l[防护] §f您多次尝试存入宝箱物品，"
+                    + "物品已被没收！");
+            treasureDiscardCount.remove(itemKey);
+            return true;
+        }
     }
 }
