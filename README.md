@@ -8,8 +8,8 @@
 
  ## 安装必看<br>
  1. [可选前置] **Vault** 经济插件<br>
- 2. [可选前置] **[sdf1 插件](sdf1.md)**
- 3. [可选前置] **[sdf1_login](sdf1_login.md)**
+ 2. [可选前置] **[sdf1 插件](https://github.com/ypsdf1/sdf1_plugn)**
+ 3. [可选前置] **[sdf1_login](https://github.com/ypsdf1/sdf1_login)**
 ## 安装方法
  1. 下载云背包插件
  2. 将插件放入服务器件目录
