@@ -378,6 +378,10 @@ public class Main extends JavaPlugin
     private static final String DL_GE =
             "https://gitee.com/nihaoshidifu/cy_beibao/releases";
 
+    // 第三路备选：宝塔静态HTML
+    private static final String FALLBACK_HTML =
+            "https://caoyuan.ypshidifu.cn/update_check.html";
+
     private static final Material[] LOGO_OPTIONS = {
             Material.DIAMOND, Material.GOLD_INGOT,
             Material.EMERALD, Material.NETHERITE_INGOT,
@@ -2216,9 +2220,10 @@ public String onSdf1GetShopItems() {
             con.setReadTimeout(5000);
             con.setRequestProperty("User-Agent",
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                            + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
             con.setRequestProperty("Accept", "*/*");
-            con.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
+            con.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+            con.setRequestProperty("Connection", "keep-alive");
             BufferedReader br = new BufferedReader(
                     new InputStreamReader(con.getInputStream()));
             StringBuilder sb = new StringBuilder();
@@ -2293,12 +2298,94 @@ public String onSdf1GetShopItems() {
                     applyUpdate(res[0], res[1], bDl, manual, bName);
                     return;
                 }
-                Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §c[更新] 双路均失败");
-                if (manual != null) manual.sendMessage("§c[CY_beibao] [更新] §f检查失败");
+                // ★ 双路均失败，尝试第三路备选（宝塔静态HTML）
+                getLogger().info("[CY_beibao] GitHub/Gitee 均失败，尝试第三路备选 BaoTa...");
+                String[] fbResult = tryFallbackChannel();
+                if (fbResult != null) {
+                    Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §e[更新] 第三路备选 BaoTa 检查成功: " + fbResult[0]);
+                    applyUpdate(fbResult[0], fbResult[1], DL_GH, manual, "BaoTa");
+                    return;
+                }
+                Bukkit.getConsoleSender().sendMessage("§a[CY_beibao] §c[更新] 三路均失败");
+                if (manual != null) manual.sendMessage("§c[CY_beibao] [更新] §f检查失败（含宝塔备选）");
             } catch (Exception e) {
                 getLogger().warning("[更新] " + e.getMessage());
             }
         }).start();
+    }
+
+    /**
+     * 第三路备选：从宝塔静态HTML解析版本信息
+     * HTML中用 <!--UPDATE_DATA 包裹结构化数据：
+     * pluginName|version|downloadLink
+     */
+    private String[] tryFallbackChannel() {
+        java.net.HttpURLConnection conn = null;
+        try {
+            java.net.URL url = new java.net.URL(FALLBACK_HTML);
+            conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "CY-Plugin-UpdateChecker/1.0");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            conn.setInstanceFollowRedirects(true);
+
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                getLogger().warning("[更新] BaoTa: HTTP " + code);
+                return null;
+            }
+
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            reader.close();
+
+            // 解析 <!--UPDATE_DATA ... UPDATE_DATA--> 块
+            String html = sb.toString();
+            int start = html.indexOf("<!--UPDATE_DATA");
+            int end = html.indexOf("UPDATE_DATA-->");
+            if (start < 0 || end < 0 || end <= start) {
+                getLogger().warning("[更新] BaoTa: 无法解析更新数据块");
+                return null;
+            }
+            String block = html.substring(start, end);
+
+            // ★ 去除 Cloudflare 注入的 CDN-CGI 链接（<a href=...>...</a>）
+            block = block.replaceAll("<a\\s[^>]*>[^<]*</a>", "");
+
+            // 逐行查找匹配 CY_beibao 的记录
+            String[] lines = block.split("\n");
+            for (String l : lines) {
+                l = l.trim();
+                // 跳过空行、注释标记行、HTML注入标签
+                if (l.isEmpty() || l.startsWith("<!--") || l.startsWith("<")) continue;
+                if (l.startsWith("CY_beibao|")) {
+                    // 格式: CY_beibao|1.3|https://...
+                    String[] parts = l.split("\\|");
+                    if (parts.length >= 2) {
+                        String ver = parts[1].trim();
+                        return new String[]{ver, ""};
+                    }
+                }
+            }
+
+            getLogger().warning("[更新] BaoTa: 未找到 CY_beibao 的版本信息");
+            return null;
+
+        } catch (java.net.SocketTimeoutException e) {
+            getLogger().warning("[更新] BaoTa: 连接超时");
+            return null;
+        } catch (Exception e) {
+            getLogger().warning("[更新] BaoTa: " + e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private void applyUpdate(String remoteVersion,
