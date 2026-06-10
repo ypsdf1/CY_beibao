@@ -6,10 +6,10 @@
  云背包插件，是由sdf1团队开发，为解决玩家物理存储空间有限、寻找物品困难而开发的。<br>
  它允许玩家将自己的物品，寄托于云背包中，玩家不需要在为自己基地被盗、基地空间不够而担心
 
- ## 安装必看<br>
+## 必装前置
  1. [可选前置] **Vault** 经济插件<br>
- 2. [可选前置] **[sdf1 插件](https://github.com/ypsdf1/sdf1_plugn)**
- 3. [可选前置] **[sdf1_login](https://github.com/ypsdf1/sdf1_login)**
+ 2. [可选前置] **[sdf1 插件](https://gitcode.com/ypsdf1/Sdf1)**
+ 3. [可选前置] **[sdf1_login](https://gitcode.com/ypsdf1/Sdf1_login)**
 ## 安装方法
  1. 下载云背包插件
  2. 将插件放入服务器件目录
@@ -37,7 +37,7 @@
 [bbsmc分流](https://bbsmc.net/plugin/cy-beibao)
 
 ## 插件源码
-[**github**](https://github.com/ypsdf1/CY_beibao)<br>
+[**gitcode**](https://gitcode.com/ypsdf1/CY_beibao)<br>
 [**gitee**](https://gitee.com/nihaoshidifu/cy_beibao)
 
 ## 版本更新
